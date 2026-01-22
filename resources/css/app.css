@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+	body {
+		@apply font-sans bg-background-light text-[#111318];
+	}
+}
+
+@layer components {
+	.p-toast {
+		@apply top-4 right-4;
+	}
+
+	.p-toast-message {
+		@apply rounded-lg border border-[#dbdfe6] bg-white shadow-lg text-sm text-[#111318];
+	}
+
+	.p-toast-message-success {
+		@apply border-tertiary/30;
+	}
+
+	.p-toast-message-error {
+		@apply border-error/30;
+	}
+
+	.p-toast-message .p-toast-message-content {
+		@apply flex items-start gap-3 px-4 py-3;
+	}
+
+	.p-toast-message .p-toast-summary {
+		@apply font-semibold;
+	}
+
+	.p-toast-message .p-toast-detail {
+		@apply text-slate-600;
+	}
+
+	.p-confirmdialog {
+		@apply rounded-xl border border-[#dbdfe6] bg-white shadow-xl p-4;
+	}
+
+	.p-confirmdialog .p-confirmdialog-message {
+		@apply text-slate-600;
+	}
+
+	.p-confirmdialog .p-confirmdialog-header {
+		@apply font-semibold text-[#111318] mb-2;
+	}
+
+	.p-confirmdialog .p-confirmdialog-footer {
+		@apply flex justify-end gap-2 mt-4;
+	}
+
+	.p-dropdown {
+		@apply w-full rounded-lg border border-[#dbdfe6] bg-white px-3 py-2 text-sm shadow-sm;
+	}
+}

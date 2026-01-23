@@ -1,7 +1,13 @@
 import './bootstrap';
 import '../css/app.css';
+import '@fontsource/ibm-plex-sans/latin-400.css';
+import '@fontsource/ibm-plex-sans/latin-500.css';
+import '@fontsource/ibm-plex-sans/latin-600.css';
+import '@fontsource/sora/latin-600.css';
+import '@fontsource/sora/latin-700.css';
 import { createApp } from 'vue';
 import PrimeVue from 'primevue/config';
+import Aura from '@primevue/themes/aura';
 import ToastService from 'primevue/toastservice';
 import ConfirmationService from 'primevue/confirmationservice';
 import Button from 'primevue/button';
@@ -16,7 +22,21 @@ import App from './App.vue';
 
 const app = createApp(App);
 
-app.use(PrimeVue, { unstyled: true, ripple: true });
+app.use(PrimeVue, {
+	ripple: true,
+	theme: {
+		preset: Aura,
+		options: {
+			darkModeSelector: '.p-dark',
+		},
+	},
+	zIndex: {
+		modal: 1100,
+		overlay: 1200,
+		menu: 1200,
+		tooltip: 1300,
+	},
+});
 app.use(ToastService);
 app.use(ConfirmationService);
 

@@ -1,30 +1,54 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+	--radius-lg: 14px;
+	--shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+	--shadow-md: 0 10px 24px rgba(15, 23, 42, 0.10);
+}
+
 @layer base {
+	* {
+		text-rendering: geometricPrecision;
+	}
+
+	button,
+	input,
+	select,
+	textarea {
+		font-family: inherit;
+	}
+
 	body {
-		@apply font-sans bg-background-light text-[#111318];
+		@apply font-sans bg-background-light text-ink;
+	}
+
+	:focus-visible {
+		outline: 2px solid rgba(37, 99, 235, 0.55);
+		outline-offset: 2px;
 	}
 }
 
 @layer components {
+	.p-component {
+		font-family: 'IBM Plex Sans', ui-sans-serif, system-ui;
+	}
+
 	.p-toast {
 		@apply top-4 right-4;
 	}
 
 	.p-toast-message {
-		@apply rounded-lg border border-[#dbdfe6] bg-white shadow-lg text-sm text-[#111318];
+		@apply rounded-xl border border-border bg-surface shadow-lg text-sm;
 	}
 
 	.p-toast-message-success {
-		@apply border-tertiary/30;
+		@apply bg-primary text-white border-primary;
 	}
 
 	.p-toast-message-error {
-		@apply border-error/30;
+		@apply bg-error text-white border-error;
 	}
 
 	.p-toast-message .p-toast-message-content {
@@ -36,19 +60,19 @@
 	}
 
 	.p-toast-message .p-toast-detail {
-		@apply text-slate-600;
+		@apply text-white/90;
 	}
 
 	.p-confirmdialog {
-		@apply rounded-xl border border-[#dbdfe6] bg-white shadow-xl p-4;
+		@apply rounded-2xl border border-border bg-surface shadow-xl p-5;
 	}
 
 	.p-confirmdialog .p-confirmdialog-message {
-		@apply text-slate-600;
+		@apply text-muted;
 	}
 
 	.p-confirmdialog .p-confirmdialog-header {
-		@apply font-semibold text-[#111318] mb-2;
+		@apply font-semibold text-ink mb-2;
 	}
 
 	.p-confirmdialog .p-confirmdialog-footer {
@@ -56,6 +80,116 @@
 	}
 
 	.p-dropdown {
-		@apply w-full rounded-lg border border-[#dbdfe6] bg-white px-3 py-2 text-sm shadow-sm;
+		@apply rounded-full border-0 bg-transparent px-1 py-0 text-sm font-semibold text-ink;
+	}
+
+	.p-dropdown .p-dropdown-trigger {
+		@apply text-muted;
+	}
+
+	.p-dropdown .p-dropdown-label {
+		@apply text-sm font-semibold text-ink;
+	}
+
+	.p-dropdown-panel {
+		@apply rounded-lg border border-border bg-surface shadow-lg;
+		z-index: 1300;
+	}
+
+	.p-dropdown-items .p-dropdown-item {
+		@apply text-sm px-3 py-2;
+	}
+
+	.p-dropdown-items .p-dropdown-item.p-highlight {
+		@apply bg-primary/10 text-primary;
+	}
+
+	.p-confirmdialog {
+		z-index: 1200;
+	}
+
+	.p-dialog,
+	.p-overlaypanel,
+	.p-datepicker,
+	.p-tooltip {
+		z-index: 1300;
+	}
+
+	/* PrimeVue DataTable (unstyled) */
+	.p-datatable {
+		@apply text-sm;
+	}
+
+	.p-datatable-table {
+		@apply w-full;
+	}
+
+	.p-datatable-thead > tr > th {
+		@apply bg-surface text-[10px] uppercase tracking-wide font-bold text-muted border-b border-border px-4 py-3;
+	}
+
+	/* Header colors via nth-child (PrimeVue unstyled ignores headerClass) */
+	.p-datatable-thead > tr > th:nth-child(1) {
+		color: #0F172A;
+		font-weight: 600;
+	}
+
+	.p-datatable-thead > tr > th:nth-child(2) {
+		color: #16A34A;
+	}
+
+	.p-datatable-thead > tr > th:nth-child(3) {
+		color: #2563EB;
+	}
+
+	.p-datatable-thead > tr > th:nth-child(4) {
+		color: #64748B;
+	}
+
+	.p-datatable-thead > tr > th:nth-child(5) {
+		color: #DC2626;
+	}
+
+	.p-datatable-tbody > tr > td {
+		@apply border-b border-border/60 px-4 py-2 text-ink text-xs;
+	}
+
+	.p-datatable-tbody > tr:hover > td {
+		@apply bg-background-light/70;
+	}
+
+	.p-datatable-striped .p-datatable-tbody > tr:nth-child(even) > td {
+		@apply bg-background-light/40;
+	}
+
+	/* Heatmap statuses */
+	.status-otimo {
+		background-color: #7BC67E;
+		border-color: #7BC67E;
+	}
+	.status-bom {
+		background-color: #7DA2FF;
+		border-color: #7DA2FF;
+	}
+	.status-regular {
+		background-color: #C7CEDA;
+		border-color: #C7CEDA;
+	}
+	.status-insat {
+		background-color: #F28B82;
+		border-color: #F28B82;
+	}
+	.status-empty {
+		background-color: #EEF2F7;
+		border-color: #E4E7EC;
+	}
+
+	/* Subtle motion */
+	.motion-soft {
+		transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease, border-color 180ms ease;
+	}
+	.motion-soft:hover {
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-md);
 	}
 }

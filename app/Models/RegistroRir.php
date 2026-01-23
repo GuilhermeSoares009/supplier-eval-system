@@ -11,6 +11,17 @@ class RegistroRir extends Model
 
     protected $fillable = [
         'fornecedor_id',
+        'numero_pedido',
+        'numero_nota_fiscal',
+        'total_itens_pedido',
+        'itens_atendidos_nota',
+        'acuracidade',
+        'criterio_embalagem',
+        'criterio_temperatura',
+        'criterio_prazo',
+        'criterio_validade',
+        'criterio_atendimento',
+        'total_pontos',
         'nota_total',
         'classificacao',
         'data_recebimento',
@@ -20,6 +31,8 @@ class RegistroRir extends Model
     protected $casts = [
         'data_recebimento' => 'date',
         'nota_total' => 'float',
+        'acuracidade' => 'float',
+        'total_pontos' => 'float',
     ];
 
     public function fornecedor(): BelongsTo

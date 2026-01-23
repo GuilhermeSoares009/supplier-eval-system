@@ -7,10 +7,10 @@ use App\Models\RegistroRir;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use RuntimeException;
 
 class RirImportService
@@ -35,14 +35,26 @@ class RirImportService
                         continue;
                     }
 
-                    $nota = $this->normalizarNota($linha['nota_total'] ?? null);
-                    if ($nota === null) {
+                    $data = $this->parseDate($linha['data_recebimento']);
+                    if (!$data) {
                         $ignorados++;
                         continue;
                     }
 
-                    $data = $this->parseDate($linha['data_recebimento']);
-                    if (!$data) {
+                    $totalItens = $this->normalizarInteiro($linha['total_itens_pedido'] ?? null);
+                    $itensAtendidos = $this->normalizarInteiro($linha['itens_atendidos_nota'] ?? null);
+                    if ($totalItens === null || $totalItens === 0 || $itensAtendidos === null) {
+                        $ignorados++;
+                        continue;
+                    }
+
+                    $embalagem = $this->normalizarBinario($linha['criterio_embalagem'] ?? null);
+                    $temperatura = $this->normalizarBinario($linha['criterio_temperatura'] ?? null);
+                    $prazo = $this->normalizarBinario($linha['criterio_prazo'] ?? null);
+                    $validade = $this->normalizarBinario($linha['criterio_validade'] ?? null);
+                    $atendimento = $this->normalizarBinario($linha['criterio_atendimento'] ?? null);
+
+                    if ($embalagem === null || $temperatura === null || $prazo === null || $validade === null || $atendimento === null) {
                         $ignorados++;
                         continue;
                     }
@@ -51,11 +63,24 @@ class RirImportService
                         'nome' => trim($linha['fornecedor']),
                     ]);
 
-                    $classificacao = $this->classificar($nota);
+                    $acuracidade = $this->calcularAcuracidade($itensAtendidos, $totalItens);
+                    $totalPontos = $this->calcularTotalPontos($acuracidade, $embalagem, $temperatura, $prazo, $validade, $atendimento);
+                    $classificacao = $this->classificar($totalPontos);
 
                     RegistroRir::create([
                         'fornecedor_id' => $fornecedor->id,
-                        'nota_total' => $nota,
+                        'numero_pedido' => $linha['numero_pedido'],
+                        'numero_nota_fiscal' => $linha['numero_nota_fiscal'],
+                        'total_itens_pedido' => $totalItens,
+                        'itens_atendidos_nota' => $itensAtendidos,
+                        'acuracidade' => $acuracidade,
+                        'criterio_embalagem' => $embalagem,
+                        'criterio_temperatura' => $temperatura,
+                        'criterio_prazo' => $prazo,
+                        'criterio_validade' => $validade,
+                        'criterio_atendimento' => $atendimento,
+                        'total_pontos' => $totalPontos,
+                        'nota_total' => $totalPontos,
                         'classificacao' => $classificacao,
                         'data_recebimento' => $data->format('Y-m-d'),
                         'mes_referencia' => $data->format('Y-m'),
@@ -92,18 +117,32 @@ class RirImportService
         for ($row = $headerRow + 1; $row <= $highestRow; $row++) {
             $fornecedor = $this->cellValue($sheet, $row, $columnMap['fornecedor'] ?? null);
             $data = $this->cellValue($sheet, $row, $columnMap['data_recebimento'] ?? null);
-            $nota = $this->cellValue($sheet, $row, $columnMap['nota_total'] ?? null);
-            $obs = $this->cellValue($sheet, $row, $columnMap['classificacao'] ?? null);
+            $numeroPedido = $this->cellValue($sheet, $row, $columnMap['numero_pedido'] ?? null);
+            $numeroNota = $this->cellValue($sheet, $row, $columnMap['numero_nota_fiscal'] ?? null);
+            $totalItens = $this->cellValue($sheet, $row, $columnMap['total_itens_pedido'] ?? null);
+            $itensAtendidos = $this->cellValue($sheet, $row, $columnMap['itens_atendidos_nota'] ?? null);
+            $embalagem = $this->cellValue($sheet, $row, $columnMap['criterio_embalagem'] ?? null);
+            $temperatura = $this->cellValue($sheet, $row, $columnMap['criterio_temperatura'] ?? null);
+            $prazo = $this->cellValue($sheet, $row, $columnMap['criterio_prazo'] ?? null);
+            $validade = $this->cellValue($sheet, $row, $columnMap['criterio_validade'] ?? null);
+            $atendimento = $this->cellValue($sheet, $row, $columnMap['criterio_atendimento'] ?? null);
 
-            if ($fornecedor === null && $data === null && $nota === null) {
+            if ($fornecedor === null && $data === null && $numeroPedido === null) {
                 continue;
             }
 
             $rows[] = [
                 'fornecedor' => $fornecedor,
                 'data_recebimento' => $data,
-                'nota_total' => $nota,
-                'classificacao' => $obs,
+                'numero_pedido' => $numeroPedido,
+                'numero_nota_fiscal' => $numeroNota,
+                'total_itens_pedido' => $totalItens,
+                'itens_atendidos_nota' => $itensAtendidos,
+                'criterio_embalagem' => $embalagem,
+                'criterio_temperatura' => $temperatura,
+                'criterio_prazo' => $prazo,
+                'criterio_validade' => $validade,
+                'criterio_atendimento' => $atendimento,
             ];
         }
 
@@ -136,15 +175,48 @@ class RirImportService
             if ($value === 'fornecedor') {
                 $map['fornecedor'] = $col;
             }
-            if ($value === 'total pontos') {
-                $map['nota_total'] = $col;
+            if ($this->isHeaderMatch($value, ['nº do pedido', 'n° do pedido', 'numero do pedido'])) {
+                $map['numero_pedido'] = $col;
             }
-            if ($value === 'obs.' || $value === 'obs') {
-                $map['classificacao'] = $col;
+            if ($this->isHeaderMatch($value, ['nº nota fiscal', 'n° nota fiscal', 'numero nota fiscal', 'nº da nota fiscal', 'n° da nota fiscal'])) {
+                $map['numero_nota_fiscal'] = $col;
+            }
+            if ($this->isHeaderMatch($value, ['total de itens do pedido', 'total itens do pedido'])) {
+                $map['total_itens_pedido'] = $col;
+            }
+            if ($this->isHeaderMatch($value, ['itens atendidos na nota', 'itens atendidos'])) {
+                $map['itens_atendidos_nota'] = $col;
+            }
+            if ($value === 'embalagem') {
+                $map['criterio_embalagem'] = $col;
+            }
+            if ($value === 'temperatura') {
+                $map['criterio_temperatura'] = $col;
+            }
+            if ($this->isHeaderMatch($value, ['prazo de entrega', 'prazo'])) {
+                $map['criterio_prazo'] = $col;
+            }
+            if ($value === 'validade') {
+                $map['criterio_validade'] = $col;
+            }
+            if ($this->isHeaderMatch($value, ['atendimento da transportadora', 'atendimento transportadora', 'atendimento'])) {
+                $map['criterio_atendimento'] = $col;
             }
         }
 
-        $required = ['data_recebimento', 'fornecedor', 'nota_total', 'classificacao'];
+        $required = [
+            'data_recebimento',
+            'fornecedor',
+            'numero_pedido',
+            'numero_nota_fiscal',
+            'total_itens_pedido',
+            'itens_atendidos_nota',
+            'criterio_embalagem',
+            'criterio_temperatura',
+            'criterio_prazo',
+            'criterio_validade',
+            'criterio_atendimento',
+        ];
         foreach ($required as $key) {
             if (!isset($map[$key])) {
                 throw new RuntimeException('Colunas obrigatórias não encontradas no arquivo RIR.');
@@ -202,9 +274,22 @@ class RirImportService
         return null;
     }
 
-    private function normalizarNota(mixed $value): ?float
+    private function normalizarInteiro(mixed $value): ?int
     {
-        if ($value === null) {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $value = preg_replace('/[^0-9]/', '', $value);
+        }
+
+        return $value === '' ? null : (int) $value;
+    }
+
+    private function normalizarBinario(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
             return null;
         }
 
@@ -212,14 +297,41 @@ class RirImportService
             $value = str_replace(',', '.', preg_replace('/[^0-9,\.]/', '', $value));
         }
 
-        $nota = (float) $value;
-        if ($nota > 1) {
-            $nota = $nota / 100;
+        $numero = (float) $value;
+
+        if (in_array($numero, [0.0, 1.0], true)) {
+            return (int) $numero;
         }
 
-        $nota = max(0, min(1, $nota));
+        return $numero >= 1 ? 1 : 0;
+    }
 
-        return $nota;
+    private function calcularAcuracidade(int $itensAtendidos, int $totalItens): float
+    {
+        if ($totalItens <= 0) {
+            return 0.0;
+        }
+
+        $valor = $itensAtendidos / $totalItens;
+        return max(0, min(1, $valor));
+    }
+
+    private function calcularTotalPontos(
+        float $acuracidade,
+        int $embalagem,
+        int $temperatura,
+        int $prazo,
+        int $validade,
+        int $atendimento
+    ): float {
+        $criterios = [$acuracidade, $embalagem, $temperatura, $prazo, $validade, $atendimento];
+        $total = array_sum($criterios) / count($criterios);
+        return max(0, min(1, $total));
+    }
+
+    private function isHeaderMatch(string $value, array $candidates): bool
+    {
+        return in_array($value, $candidates, true);
     }
 
     private function classificar(float $nota): string

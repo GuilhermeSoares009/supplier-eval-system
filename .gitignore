@@ -53,6 +53,8 @@ Thumbs.db
 # Testing
 /coverage
 /.phpunit.result.cache
+TEST_REPORT.xml
+TEST_REPORT.txt
 
 # Build
 /public/build/*

@@ -10,7 +10,7 @@
                         <path d="M24 4H42V17.3333V30.6667H24V44H6V30.6667V17.3333H24V4Z"></path>
                     </svg>
                 </div>
-                <h1 class="text-sm font-semibold leading-tight">Supplier Evaluation Dashboard</h1>
+                <h1 class="text-sm font-semibold leading-tight">Painel de Avaliação de Fornecedores</h1>
             </div>
         </header>
 
@@ -24,8 +24,8 @@
                     @drop.prevent="handleDrop"
                 >
                     <div class="flex flex-col gap-2">
-                        <h2 class="text-sm font-semibold">Smart Import</h2>
-                        <p class="text-xs text-muted">Drag and drop your RIR data files here to start the evaluation process.</p>
+                        <h2 class="text-sm font-semibold">Importação Inteligente</h2>
+                        <p class="text-xs text-muted">Arraste e solte os arquivos RIR para iniciar o processo de avaliação.</p>
                     </div>
                     <div class="mt-4 flex flex-wrap justify-center gap-3">
                         <div
@@ -42,7 +42,7 @@
                         <label class="inline-flex">
                             <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileInput" />
                             <span class="cursor-pointer rounded-lg bg-white px-4 py-2 text-xs font-semibold border border-border hover:bg-background-light">
-                                Browse files
+                                Selecionar arquivos
                             </span>
                         </label>
                         <Button
@@ -53,7 +53,7 @@
                             <span v-if="!isUploading">Importar</span>
                             <span v-else class="inline-flex items-center gap-2">
                                 <ProgressSpinner style="width: 16px; height: 16px" strokeWidth="6" />
-                                Importing
+                                Importando
                             </span>
                         </Button>
                     </div>
@@ -62,15 +62,15 @@
 
             <section class="space-y-4">
                 <div class="flex items-center justify-between flex-wrap gap-3">
-                    <h2 class="text-base font-semibold">Monthly Consolidated Analysis</h2>
+                    <h2 class="text-base font-semibold">Análise Consolidada Mensal</h2>
                     <div class="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 shadow-sm">
-                        <span class="text-[11px] text-muted font-medium">Filter:</span>
+                        <span class="text-[11px] text-muted font-medium">Filtro:</span>
                         <Dropdown
                             v-model="selectedMonth"
                             :options="monthOptions"
                             optionLabel="label"
                             optionValue="value"
-                            placeholder="Select month"
+                            placeholder="Selecionar mês"
                             appendTo="body"
                             scrollHeight="240px"
                             @change="loadDashboard"
@@ -79,9 +79,9 @@
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
-                        <div class="max-h-[420px] overflow-y-auto">
-                            <DataTable :value="dashboard" stripedRows>
-                            <Column field="fornecedor" header="SUPPLIER"></Column>
+                        <div class="max-h-[420px] overflow-auto">
+                            <DataTable :value="dashboard" stripedRows :key="`${selectedMonth}-${dashboard.length}`">
+                            <Column field="fornecedor" header="FORNECEDOR"></Column>
                             <Column field="otimo" header="ÓTIMO"></Column>
                             <Column field="bom" header="BOM"></Column>
                             <Column field="regular" header="REGULAR"></Column>
@@ -92,7 +92,7 @@
 
                     <div class="flex flex-col gap-5 p-6 rounded-xl border border-border bg-surface shadow-sm">
                         <div class="flex justify-between items-center">
-                            <h3 class="text-[10px] font-extrabold uppercase tracking-wide text-muted">Distribution by supplier</h3>
+                            <h3 class="text-[10px] font-extrabold uppercase tracking-wide text-muted">Distribuição por fornecedor</h3>
                             <div class="flex gap-3 text-[9px] font-extrabold uppercase tracking-wide text-muted">
                                 <span class="flex items-center gap-1"><i class="w-3 h-3 bg-tertiary rounded-sm"></i> ÓTIMO</span>
                                 <span class="flex items-center gap-1"><i class="w-3 h-3 bg-primary rounded-sm"></i> BOM</span>
@@ -121,19 +121,19 @@
 
             <section class="space-y-4">
                 <div class="flex items-center justify-between px-4 flex-wrap gap-3">
-                    <h2 class="text-base font-semibold">Yearly Performance Heatmap</h2>
+                    <h2 class="text-base font-semibold">Heatmap de Performance Anual</h2>
                     <Button
-                        class="flex items-center gap-2 px-4 py-2 bg-primary text-white text-xs font-semibold rounded-lg hover:bg-primary/90"
+                        class="flex items-center gap-2 px-5 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 whitespace-nowrap min-w-[140px]"
                         icon="pi pi-download"
                         @click="exportarAvaliacao"
                     >
-                        Export Excel
+                        Exportar Excel
                     </Button>
                 </div>
                 <div class="p-6 rounded-xl border border-border bg-surface shadow-sm overflow-x-auto">
                     <div class="min-w-[800px]">
                         <div class="grid grid-cols-13 gap-1 mb-4 text-[10px] font-bold uppercase tracking-wide text-muted">
-                            <div>Supplier</div>
+                            <div>Fornecedor</div>
                             <div v-for="mes in meses" :key="mes" class="text-center">{{ mesesLabel[mes] || mes }}</div>
                         </div>
 
@@ -149,8 +149,8 @@
                         </div>
                     </div>
                     <div class="mt-5 flex justify-end gap-6 text-[10px] text-muted font-bold uppercase tracking-wide">
-                        <div class="flex items-center gap-2"><i class="w-3 h-3 bg-tertiary rounded-sm"></i> HIGH QUALITY</div>
-                        <div class="flex items-center gap-2"><i class="w-3 h-3 bg-error rounded-sm"></i> CRITICAL RISK</div>
+                        <div class="flex items-center gap-2"><i class="w-3 h-3 bg-tertiary rounded-sm"></i> ALTA QUALIDADE</div>
+                        <div class="flex items-center gap-2"><i class="w-3 h-3 bg-error rounded-sm"></i> RISCO CRÍTICO</div>
                     </div>
                 </div>
             </section>
@@ -158,9 +158,9 @@
 
         <footer class="border-t border-border bg-surface">
             <div class="mx-auto flex max-w-5xl flex-col sm:flex-row items-center justify-between gap-3 px-6 lg:px-10 py-6">
-                <p class="text-xs text-muted">© 2026 Quality Management Systems — Internal Supplier Audit Tool</p>
+                <p class="text-xs text-muted">© 2026 Quality Management Systems — Ferramenta de Auditoria Interna</p>
                 <button class="text-sm font-semibold text-error hover:underline" @click="confirmarLimpeza">
-                    Clear data
+                    Limpar dados
                 </button>
             </div>
         </footer>
@@ -185,17 +185,17 @@ const selectedYear = ref(currentYear);
 const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const mesesLabel = {
     Jan: 'Jan',
-    Fev: 'Feb',
+    Fev: 'Fev',
     Mar: 'Mar',
-    Abr: 'Apr',
-    Mai: 'May',
+    Abr: 'Abr',
+    Mai: 'Mai',
     Jun: 'Jun',
     Jul: 'Jul',
-    Ago: 'Aug',
-    Set: 'Sep',
-    Out: 'Oct',
+    Ago: 'Ago',
+    Set: 'Set',
+    Out: 'Out',
     Nov: 'Nov',
-    Dez: 'Dec',
+    Dez: 'Dez',
 };
 const monthOptions = ref([]);
 const selectedMonth = ref('');
@@ -238,7 +238,12 @@ const uploadFiles = async () => {
             life: 4000,
         });
         files.value = [];
-        await Promise.all([loadDashboard(), loadHeatmap()]);
+        if (Array.isArray(data.meses) && data.meses.length > 0) {
+            const ordenados = [...data.meses].sort();
+            selectedMonth.value = ordenados[ordenados.length - 1];
+        }
+        await loadDashboard();
+        await loadHeatmap();
     } catch (error) {
         toast.add({
             severity: 'error',
@@ -252,7 +257,10 @@ const uploadFiles = async () => {
 };
 
 const loadDashboard = async () => {
-    const params = selectedMonth.value ? { mes: selectedMonth.value } : {};
+    const params = {
+        ...(selectedMonth.value ? { mes: selectedMonth.value } : {}),
+        _ts: Date.now(),
+    };
     const { data } = await axios.get('/api/dashboard-mensal', { params });
     dashboard.value = data.fornecedores;
     if (Array.isArray(data.meses) && data.meses.length > 0) {
@@ -272,7 +280,10 @@ const loadDashboard = async () => {
 };
 
 const loadHeatmap = async () => {
-    const params = selectedYear.value ? { ano: selectedYear.value } : {};
+    const params = {
+        ...(selectedYear.value ? { ano: selectedYear.value } : {}),
+        _ts: Date.now(),
+    };
     const { data } = await axios.get('/api/heatmap-anual', { params });
     heatmap.value = data.fornecedores;
     selectedYear.value = data.ano;

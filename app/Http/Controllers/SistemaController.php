@@ -9,9 +9,11 @@ class SistemaController extends Controller
 {
     public function limpar(): JsonResponse
     {
-        DB::statement('DELETE FROM registros_rir');
-        DB::statement('DELETE FROM fornecedores');
-        DB::statement("DELETE FROM sqlite_sequence WHERE name IN ('registros_rir', 'fornecedores')");
+        DB::transaction(function () {
+            DB::statement('DELETE FROM registros_rir');
+            DB::statement('DELETE FROM fornecedores');
+            DB::statement("DELETE FROM sqlite_sequence WHERE name IN ('registros_rir', 'fornecedores')");
+        });
 
         return response()->json([
             'status' => 'ok',

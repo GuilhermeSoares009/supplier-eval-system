@@ -65,6 +65,8 @@
 
 	.p-confirmdialog {
 		@apply rounded-2xl border border-border bg-surface shadow-xl p-5;
+		max-width: 420px;
+		z-index: 1200;
 	}
 
 	.p-confirmdialog .p-confirmdialog-message {
@@ -104,15 +106,15 @@
 		@apply bg-primary/10 text-primary;
 	}
 
-	.p-confirmdialog {
-		z-index: 1200;
-	}
-
 	.p-dialog,
 	.p-overlaypanel,
 	.p-datepicker,
 	.p-tooltip {
 		z-index: 1300;
+	}
+
+	.p-component-overlay {
+		background: rgba(15, 23, 42, 0.35);
 	}
 
 	/* PrimeVue DataTable (unstyled) */
@@ -122,10 +124,13 @@
 
 	.p-datatable-table {
 		@apply w-full;
+		min-width: 520px;
+		table-layout: fixed;
 	}
 
 	.p-datatable-thead > tr > th {
 		@apply bg-surface text-[10px] uppercase tracking-wide font-bold text-muted border-b border-border px-4 py-3;
+		white-space: nowrap;
 	}
 
 	/* Header colors via nth-child (PrimeVue unstyled ignores headerClass) */
@@ -152,6 +157,18 @@
 
 	.p-datatable-tbody > tr > td {
 		@apply border-b border-border/60 px-4 py-2 text-ink text-xs;
+		white-space: nowrap;
+	}
+
+	.p-datatable-thead > tr > th:first-child,
+	.p-datatable-tbody > tr > td:first-child {
+		width: 40%;
+	}
+
+	.p-datatable-thead > tr > th:not(:first-child),
+	.p-datatable-tbody > tr > td:not(:first-child) {
+		width: 15%;
+		text-align: center;
 	}
 
 	.p-datatable-tbody > tr:hover > td {

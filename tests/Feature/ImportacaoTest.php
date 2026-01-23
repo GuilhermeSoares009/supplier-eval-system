@@ -38,4 +38,23 @@ class ImportacaoTest extends TestCase
         $this->assertEqualsWithDelta($totalEsperado, $registro->total_pontos, 0.01);
         $this->assertEquals('Ótimo', $registro->classificacao);
     }
+
+    public function test_importa_arquivo_rir_quando_cabecalho_nota_fiscal_tem_sufixo_numerico(): void
+    {
+        $csv = implode("\n", [
+            'Data de recebimento,Fornecedor,Nº do pedido,Nº Nota Fiscal2,Total de itens do pedido,Itens atendidos na nota,Embalagem,Temperatura,Prazo de Entrega,Validade,Atendimento da transportadora',
+            '2026-01-23,Fornecedor A,123*1,456,10,5,1,1,1,1,1',
+        ]);
+
+        $file = UploadedFile::fake()->createWithContent('rir.csv', $csv);
+
+        $response = $this->postJson('/api/importar-rir', [
+            'arquivos' => [$file],
+        ]);
+
+        $response->assertOk();
+        $response->assertJson([
+            'importados' => 1,
+        ]);
+    }
 }

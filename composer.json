@@ -36,6 +36,7 @@
     },
     "scripts": {
         "test:report": "php vendor/bin/pest --log-junit TEST_REPORT.xml && php tools/generate_test_report.php",
+        "rir:diag": "php tools/generate_rir_import_diagnostic.php",
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"

@@ -6,6 +6,7 @@ use App\Models\Fornecedor;
 use App\Models\RegistroRir;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -111,7 +112,18 @@ class RirImportService
             throw new RuntimeException('Cabeçalho não encontrado no arquivo RIR.');
         }
 
+        Log::channel('rir_import')->debug('Linha de cabeçalho detectada', [
+            'header_row' => $headerRow,
+            'highest_row' => $highestRow,
+            'highest_column_index' => $highestColumnIndex,
+        ]);
+
         $columnMap = $this->buildColumnMap($sheet, $headerRow, $highestColumnIndex);
+
+        Log::channel('rir_import')->debug('Mapa de colunas detectado', [
+            'header_row' => $headerRow,
+            'map' => $columnMap,
+        ]);
 
         $rows = [];
         for ($row = $headerRow + 1; $row <= $highestRow; $row++) {
@@ -151,55 +163,85 @@ class RirImportService
 
     private function findHeaderRow(Worksheet $sheet, int $highestRow, int $highestColumnIndex): ?int
     {
-        $maxSearch = min($highestRow, 15);
+        $maxSearch = min($highestRow, 30);
+        $bestRow = null;
+        $bestScore = 0;
+
         for ($row = 1; $row <= $maxSearch; $row++) {
+            $score = 0;
+
             for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                $value = $this->normalizeHeader($this->cellValue($sheet, $row, $col));
-                if ($value === 'data de recebimento') {
-                    return $row;
+                $header = $this->normalizeHeader($this->cellValue($sheet, $row, $col));
+                if ($header === '') {
+                    continue;
                 }
+
+                if ($this->isDataRecebimentoHeader($header)) {
+                    $score += 2;
+                }
+                if ($this->isFornecedorHeader($header)) {
+                    $score += 2;
+                }
+                if ($this->isNumeroPedidoHeader($header)) {
+                    $score += 1;
+                }
+                if ($this->isNumeroNotaFiscalHeader($header)) {
+                    $score += 1;
+                }
+            }
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestRow = $row;
             }
         }
 
-        return null;
+        return $bestScore >= 4 ? $bestRow : null;
     }
 
     private function buildColumnMap(Worksheet $sheet, int $headerRow, int $highestColumnIndex): array
     {
         $map = [];
+        $headers = [];
         for ($col = 1; $col <= $highestColumnIndex; $col++) {
             $value = $this->normalizeHeader($this->cellValue($sheet, $headerRow, $col));
-            if ($value === 'data de recebimento') {
+            if ($value === '') {
+                continue;
+            }
+
+            $headers[$col] = $value;
+
+            if ($this->isDataRecebimentoHeader($value)) {
                 $map['data_recebimento'] = $col;
             }
-            if ($value === 'fornecedor') {
+            if ($this->isFornecedorHeader($value)) {
                 $map['fornecedor'] = $col;
             }
-            if ($this->isHeaderMatch($value, ['nº do pedido', 'n° do pedido', 'numero do pedido'])) {
+            if ($this->isNumeroPedidoHeader($value)) {
                 $map['numero_pedido'] = $col;
             }
-            if ($this->isHeaderMatch($value, ['nº nota fiscal', 'n° nota fiscal', 'numero nota fiscal', 'nº da nota fiscal', 'n° da nota fiscal'])) {
+            if ($this->isNumeroNotaFiscalHeader($value)) {
                 $map['numero_nota_fiscal'] = $col;
             }
-            if ($this->isHeaderMatch($value, ['total de itens do pedido', 'total itens do pedido'])) {
+            if ($this->hasAllWords($value, ['total', 'itens', 'pedido'])) {
                 $map['total_itens_pedido'] = $col;
             }
-            if ($this->isHeaderMatch($value, ['itens atendidos na nota', 'itens atendidos'])) {
+            if ($this->isItensAtendidosHeader($value)) {
                 $map['itens_atendidos_nota'] = $col;
             }
-            if ($value === 'embalagem') {
+            if ($this->hasWord($value, 'embalagem')) {
                 $map['criterio_embalagem'] = $col;
             }
-            if ($value === 'temperatura') {
+            if ($this->hasWord($value, 'temperatura')) {
                 $map['criterio_temperatura'] = $col;
             }
-            if ($this->isHeaderMatch($value, ['prazo de entrega', 'prazo'])) {
+            if ($this->hasWord($value, 'prazo')) {
                 $map['criterio_prazo'] = $col;
             }
-            if ($value === 'validade') {
+            if ($this->hasWord($value, 'validade')) {
                 $map['criterio_validade'] = $col;
             }
-            if ($this->isHeaderMatch($value, ['atendimento da transportadora', 'atendimento transportadora', 'atendimento'])) {
+            if ($this->hasWord($value, 'atendimento')) {
                 $map['criterio_atendimento'] = $col;
             }
         }
@@ -219,7 +261,16 @@ class RirImportService
         ];
         foreach ($required as $key) {
             if (!isset($map[$key])) {
-                throw new RuntimeException('Colunas obrigatórias não encontradas no arquivo RIR.');
+                $faltantes = array_values(array_filter($required, fn ($k) => !isset($map[$k])));
+
+                Log::channel('rir_import')->warning('Falha ao mapear colunas obrigatórias', [
+                    'header_row' => $headerRow,
+                    'faltantes' => $faltantes,
+                    'headers_normalizados' => $headers,
+                    'map_detectado' => $map,
+                ]);
+
+                throw new RuntimeException('Colunas obrigatórias não encontradas no arquivo RIR: ' . implode(', ', $faltantes) . '.');
             }
         }
 
@@ -247,10 +298,18 @@ class RirImportService
         }
 
         $normalized = mb_strtolower(trim($value));
-        $normalized = preg_replace('/\s+/', ' ', $normalized);
-        $normalized = str_replace(['"', "'"], '', $normalized);
+        $normalized = str_replace(["\r", "\n", "\t"], ' ', $normalized);
+        $normalized = str_replace(['º', '°'], 'o', $normalized);
 
-        return $normalized;
+        $translit = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $normalized);
+        if (is_string($translit) && $translit !== '') {
+            $normalized = $translit;
+        }
+
+        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $normalized);
+        $normalized = preg_replace('/\s+/', ' ', $normalized);
+
+        return trim($normalized);
     }
 
     private function parseDate(mixed $value): ?Carbon
@@ -329,9 +388,102 @@ class RirImportService
         return max(0, min(1, $total));
     }
 
-    private function isHeaderMatch(string $value, array $candidates): bool
+    private function words(string $value): array
     {
-        return in_array($value, $candidates, true);
+        $value = trim($value);
+        if ($value === '') {
+            return [];
+        }
+
+        $parts = preg_split('/\s+/', $value) ?: [];
+        $parts = array_map(function ($part) {
+            $part = trim((string) $part);
+            if ($part === '') {
+                return '';
+            }
+
+            $part = preg_replace('/\d+/', '', $part);
+
+            return trim((string) $part);
+        }, $parts);
+
+        $parts = array_values(array_filter($parts, fn ($p) => $p !== ''));
+
+        return array_values(array_unique($parts));
+    }
+
+    private function hasWord(string $header, string $word): bool
+    {
+        return in_array($word, $this->words($header), true);
+    }
+
+    private function hasAllWords(string $header, array $words): bool
+    {
+        $headerWords = $this->words($header);
+        foreach ($words as $word) {
+            if (!in_array($word, $headerWords, true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function isDataRecebimentoHeader(string $header): bool
+    {
+        return $this->hasAllWords($header, ['data', 'recebimento'])
+            || $this->hasAllWords($header, ['data', 'receb']);
+    }
+
+    private function isFornecedorHeader(string $header): bool
+    {
+        return $this->hasWord($header, 'fornecedor');
+    }
+
+    private function isNumeroPedidoHeader(string $header): bool
+    {
+        $words = $this->words($header);
+        if (!in_array('pedido', $words, true)) {
+            return false;
+        }
+
+        return in_array('numero', $words, true)
+            || in_array('n', $words, true)
+            || in_array('no', $words, true)
+            || in_array('nro', $words, true)
+            || in_array('num', $words, true);
+    }
+
+    private function isNumeroNotaFiscalHeader(string $header): bool
+    {
+        $words = $this->words($header);
+
+        if (in_array('nf', $words, true) || in_array('nfe', $words, true)) {
+            return true;
+        }
+
+        if (!(in_array('nota', $words, true) && in_array('fiscal', $words, true))) {
+            return false;
+        }
+
+        return in_array('numero', $words, true)
+            || in_array('n', $words, true)
+            || in_array('no', $words, true)
+            || in_array('nro', $words, true)
+            || in_array('num', $words, true)
+            || $this->hasAllWords($header, ['da', 'nota', 'fiscal']);
+    }
+
+    private function isItensAtendidosHeader(string $header): bool
+    {
+        if (!$this->hasWord($header, 'itens')) {
+            return false;
+        }
+
+        $words = $this->words($header);
+        $temAtendidos = in_array('atendidos', $words, true) || in_array('entregues', $words, true);
+        $temNota = in_array('nota', $words, true) || in_array('nf', $words, true);
+
+        return $temAtendidos && $temNota;
     }
 
     private function classificar(float $nota): string

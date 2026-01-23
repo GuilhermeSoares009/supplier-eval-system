@@ -46,7 +46,7 @@
                             </span>
                         </label>
                         <Button
-                            class="rounded-lg bg-primary text-white px-4 py-2 text-xs font-semibold hover:bg-primary/90"
+                            class="rounded-lg bg-primary text-white px-4 py-2 text-xs font-medium hover:bg-primary/90"
                             :disabled="files.length === 0 || isUploading"
                             @click="uploadFiles"
                         >
@@ -119,49 +119,33 @@
                 </div>
             </section>
 
-            <section class="space-y-4">
-                <div class="flex items-center justify-between px-4 flex-wrap gap-3">
-                    <h2 class="text-base font-semibold">Heatmap de Performance Anual</h2>
-                    <Button
-                        class="flex items-center gap-2 px-5 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 whitespace-nowrap min-w-[140px]"
-                        icon="pi pi-download"
-                        @click="exportarAvaliacao"
-                    >
-                        Exportar Excel
-                    </Button>
-                </div>
-                <div class="p-6 rounded-xl border border-border bg-surface shadow-sm overflow-x-auto">
-                    <div class="min-w-[800px]">
-                        <div class="grid grid-cols-13 gap-1 mb-4 text-[10px] font-bold uppercase tracking-wide text-muted">
-                            <div>Fornecedor</div>
-                            <div v-for="mes in meses" :key="mes" class="text-center">{{ mesesLabel[mes] || mes }}</div>
-                        </div>
-
-                        <div v-for="linha in heatmap" :key="linha.fornecedor" class="grid grid-cols-13 gap-1 items-center mb-2">
-                            <div class="text-sm font-medium">{{ linha.fornecedor }}</div>
-                            <div
-                                v-for="mes in meses"
-                                :key="mes"
-                                class="h-7 rounded-md"
-                                :class="statusClass(linha.meses[mes])"
-                                :title="linha.meses[mes] || 'Sem dados'"
-                            ></div>
-                        </div>
-                    </div>
-                    <div class="mt-5 flex justify-end gap-6 text-[10px] text-muted font-bold uppercase tracking-wide">
-                        <div class="flex items-center gap-2"><i class="w-3 h-3 bg-tertiary rounded-sm"></i> ALTA QUALIDADE</div>
-                        <div class="flex items-center gap-2"><i class="w-3 h-3 bg-error rounded-sm"></i> RISCO CRÍTICO</div>
-                    </div>
-                </div>
+            <section class="flex justify-end gap-3">
+                <Button
+                    class="flex items-center gap-2 px-5 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 whitespace-nowrap min-w-[150px]"
+                    icon="pi pi-download"
+                    :disabled="isExporting"
+                    @click="exportarAvaliacao"
+                >
+                    <span v-if="!isExporting">Exportar Excel</span>
+                    <span v-else class="inline-flex items-center gap-2">
+                        <ProgressSpinner style="width: 14px; height: 14px" strokeWidth="6" />
+                        Exportando
+                    </span>
+                </Button>
+                <Button
+                    class="flex items-center gap-2 px-5 py-2 text-xs font-medium rounded-lg whitespace-nowrap min-w-[150px]"
+                    severity="danger"
+                    icon="pi pi-trash"
+                    @click="confirmarLimpeza"
+                >
+                    Limpar dados
+                </Button>
             </section>
         </main>
 
         <footer class="border-t border-border bg-surface">
             <div class="mx-auto flex max-w-5xl flex-col sm:flex-row items-center justify-between gap-3 px-6 lg:px-10 py-6">
                 <p class="text-xs text-muted">© 2026 Quality Management Systems — Ferramenta de Auditoria Interna</p>
-                <button class="text-sm font-semibold text-error hover:underline" @click="confirmarLimpeza">
-                    Limpar dados
-                </button>
             </div>
         </footer>
     </div>
@@ -178,6 +162,7 @@ const confirm = useConfirm();
 const files = ref([]);
 const isDragging = ref(false);
 const isUploading = ref(false);
+const isExporting = ref(false);
 const dashboard = ref([]);
 const heatmap = ref([]);
 const currentYear = new Date().getFullYear();
@@ -243,7 +228,6 @@ const uploadFiles = async () => {
             selectedMonth.value = ordenados[ordenados.length - 1];
         }
         await loadDashboard();
-        await loadHeatmap();
     } catch (error) {
         toast.add({
             severity: 'error',
@@ -279,18 +263,15 @@ const loadDashboard = async () => {
     }
 };
 
-const loadHeatmap = async () => {
-    const params = {
-        ...(selectedYear.value ? { ano: selectedYear.value } : {}),
-        _ts: Date.now(),
-    };
-    const { data } = await axios.get('/api/heatmap-anual', { params });
-    heatmap.value = data.fornecedores;
-    selectedYear.value = data.ano;
-};
-
 const exportarAvaliacao = async () => {
     try {
+        isExporting.value = true;
+        toast.add({
+            severity: 'info',
+            summary: 'Exportação em andamento',
+            detail: 'Gerando o arquivo Excel, aguarde...',
+            life: 3000,
+        });
         const response = await axios.get('/api/exportar-avaliacao', {
             params: { ano: selectedYear.value },
             responseType: 'blob',
@@ -308,6 +289,8 @@ const exportarAvaliacao = async () => {
             detail: 'Não foi possível gerar o arquivo XLSX.',
             life: 5000,
         });
+    } finally {
+        isExporting.value = false;
     }
 };
 
@@ -324,10 +307,9 @@ const confirmarLimpeza = () => {
             try {
                 await axios.post('/api/limpar-dados');
                 dashboard.value = [];
-                heatmap.value = [];
                 monthOptions.value = [];
                 selectedMonth.value = '';
-                await Promise.all([loadDashboard(), loadHeatmap()]);
+                await loadDashboard();
                 toast.add({
                     severity: 'success',
                     summary: 'Base limpa',
@@ -367,7 +349,7 @@ const statusClass = (status) => {
 };
 
 onMounted(async () => {
-    await Promise.all([loadDashboard(), loadHeatmap()]);
+    await loadDashboard();
 });
 </script>
 

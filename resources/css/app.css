@@ -129,7 +129,7 @@
 	}
 
 	.p-datatable-thead > tr > th {
-		@apply bg-surface text-[10px] uppercase tracking-wide font-bold text-muted border-b border-border px-4 py-3;
+		@apply bg-surface text-[8px] uppercase tracking-normal font-medium text-muted border-b border-border px-4 py-3;
 		white-space: nowrap;
 	}
 
@@ -148,11 +148,11 @@
 	}
 
 	.p-datatable-thead > tr > th:nth-child(4) {
-		color: #64748B;
+		color: #6B7280;
 	}
 
 	.p-datatable-thead > tr > th:nth-child(5) {
-		color: #DC2626;
+		color: #EF4444;
 	}
 
 	.p-datatable-tbody > tr > td {

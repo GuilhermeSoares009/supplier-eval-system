@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Exports\AvaliacaoConsolidadaExport;
-use App\Services\AvaliacaoConsolidadaService;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 use RuntimeException;
@@ -11,13 +10,13 @@ use Throwable;
 
 class ExportacaoController extends Controller
 {
-    public function exportar(Request $request, AvaliacaoConsolidadaService $service)
+    public function exportar(Request $request)
     {
         $ano = (int) $request->get('ano', now()->year);
         try {
             return Excel::download(
-                new AvaliacaoConsolidadaExport($ano, $service),
-                sprintf('AVALIACAO_FORNECEDORES_%d.xlsx', $ano)
+                new AvaliacaoConsolidadaExport($ano),
+                'AVALIAÇÃO DE FORNECEDORES.xlsx'
             );
         } catch (RuntimeException $exception) {
             return response()->json([

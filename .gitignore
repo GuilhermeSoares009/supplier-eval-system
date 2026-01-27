@@ -74,3 +74,11 @@ phpunit.xml
 *.tmp
 *.temp
 *.bak
+
+# Reports
+RIR_IMPORT_DIAGNOSTIC.txt
+TEST_REPORT.txt
+TEST_REPORT.xml
+
+
+

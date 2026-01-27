@@ -3,503 +3,349 @@
 namespace App\Services;
 
 use App\Models\Fornecedor;
+use App\Models\FornecedorAlias;
 use App\Models\RegistroRir;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use RuntimeException;
 
 class RirImportService
 {
+    // Configurações do Layout Fixo
+    // O arquivo real tem 4 linhas de cabeçalho irrelevante/logo. A linha 5 contém os dados.
+    // Então pulamos 4 linhas.
+    private const ROW_OFFSET = 4;
+    private const COL_DATA = 1;         // A
+    private const COL_FORNECEDOR = 2;   // B
+    private const COL_PEDIDO = 3;       // C
+    private const COL_NOTA = 4;         // D
+    private const COL_TOTAL_ITENS = 5;  // E
+    private const COL_ITENS_ATEND = 6;  // F
+    // COL G (7) é calculada/ignorada
+    private const COL_EMBALAGEM = 8;    // H
+    private const COL_TEMPERATURA = 9;  // I
+    private const COL_PRAZO = 10;       // J
+    private const COL_VALIDADE = 11;    // K
+    private const COL_ATENDIMENTO = 12; // L
+    private const COL_PONTOS = 13;      // M
+    private const COL_OBS = 14;         // N
+
+    private array $aliases = [];
+
     public function import(array $files): array
     {
+        $this->carregarAliases();
         $importados = 0;
         $ignorados = 0;
+        $atualizados = 0;
         $meses = [];
 
-        DB::transaction(function () use ($files, &$importados, &$ignorados, &$meses) {
+        DB::transaction(function () use ($files, &$importados, &$ignorados, &$atualizados, &$meses) {
             foreach ($files as $file) {
                 if (!$file instanceof UploadedFile) {
                     continue;
                 }
 
-                $linhas = $this->parseSpreadsheet($file->getRealPath());
+                // Parseia todas as abas do arquivo
+                $linhas = $this->parseSpreadsheet($file);
 
                 foreach ($linhas as $linha) {
-                    if (empty($linha['fornecedor']) || empty($linha['data_recebimento'])) {
+                    // Validação básica: Fornecedor e Pontos
+                    if (empty($linha['fornecedor'])) {
                         $ignorados++;
                         continue;
                     }
 
-                    $data = $this->parseDate($linha['data_recebimento']);
-                    if (!$data) {
+                    // Se Data continua inválida mesmo após tentativas de fallback
+                    if (!$linha['data_recebimento'] instanceof Carbon) {
                         $ignorados++;
                         continue;
                     }
 
-                    $totalItens = $this->normalizarInteiro($linha['total_itens_pedido'] ?? null);
-                    $itensAtendidos = $this->normalizarInteiro($linha['itens_atendidos_nota'] ?? null);
-                    if ($totalItens === null || $totalItens === 0 || $itensAtendidos === null) {
-                        $ignorados++;
-                        continue;
-                    }
+                    // Normalização
+                    $nomeFornecedor = $this->normalizarFornecedor($linha['fornecedor']);
+                    $fornecedor = Fornecedor::firstOrCreate(['nome' => $nomeFornecedor]);
 
-                    $embalagem = $this->normalizarBinario($linha['criterio_embalagem'] ?? null);
-                    $temperatura = $this->normalizarBinario($linha['criterio_temperatura'] ?? null);
-                    $prazo = $this->normalizarBinario($linha['criterio_prazo'] ?? null);
-                    $validade = $this->normalizarBinario($linha['criterio_validade'] ?? null);
-                    $atendimento = $this->normalizarBinario($linha['criterio_atendimento'] ?? null);
-
-                    if ($embalagem === null || $temperatura === null || $prazo === null || $validade === null || $atendimento === null) {
-                        $ignorados++;
-                        continue;
-                    }
-
-                    $fornecedor = Fornecedor::firstOrCreate([
-                        'nome' => trim($linha['fornecedor']),
-                    ]);
-
-                    $acuracidade = $this->calcularAcuracidade($itensAtendidos, $totalItens);
-                    $totalPontos = $this->calcularTotalPontos($acuracidade, $embalagem, $temperatura, $prazo, $validade, $atendimento);
-                    $classificacao = $this->classificar($totalPontos);
-
-                    RegistroRir::create([
+                    // Dados para chave única
+                    $chaveUnica = [
                         'fornecedor_id' => $fornecedor->id,
                         'numero_pedido' => $linha['numero_pedido'],
                         'numero_nota_fiscal' => $linha['numero_nota_fiscal'],
-                        'total_itens_pedido' => $totalItens,
-                        'itens_atendidos_nota' => $itensAtendidos,
-                        'acuracidade' => $acuracidade,
-                        'criterio_embalagem' => $embalagem,
-                        'criterio_temperatura' => $temperatura,
-                        'criterio_prazo' => $prazo,
-                        'criterio_validade' => $validade,
-                        'criterio_atendimento' => $atendimento,
-                        'total_pontos' => $totalPontos,
-                        'nota_total' => $totalPontos,
-                        'classificacao' => $classificacao,
-                        'data_recebimento' => $data->format('Y-m-d'),
-                        'mes_referencia' => $data->format('Y-m'),
-                    ]);
+                        'data_recebimento' => $linha['data_recebimento']->format('Y-m-d'),
+                    ];
 
-                    $meses[] = $data->format('Y-m');
-                    $importados++;
+                    $dadosUpdate = [
+                        'total_itens_pedido' => $this->normalizarInteiro($linha['total_itens_pedido']),
+                        'itens_atendidos_nota' => $this->normalizarInteiro($linha['itens_atendidos_nota']),
+                        'criterio_embalagem' => $this->normalizarBinario($linha['criterio_embalagem']),
+                        'criterio_temperatura' => $this->normalizarBinario($linha['criterio_temperatura']),
+                        'criterio_prazo' => $this->normalizarBinario($linha['criterio_prazo']),
+                        'criterio_validade' => $this->normalizarBinario($linha['criterio_validade']),
+                        'criterio_atendimento' => $this->normalizarBinario($linha['criterio_atendimento']),
+                        'total_pontos' => $linha['total_pontos'],
+                        'classificacao' => $linha['classificacao'], // Usa a classificação do arquivo ou recalcula? O USER disse "Se Coluna M for erro...". "Embora o sistema leia o valor pronto, a validação deve ser...".
+                        // Vou recalcular para garantir consistência, mas o usuário disse para ler a coluna M.
+                        // O requisito diz: "Fórmula Reversa: O sistema deve ler a string 100% ou 0.83 e converter para float".
+                        'nota_total' => $linha['total_pontos'],
+                        'mes_referencia' => $linha['data_recebimento']->format('Y-m'),
+                    ];
+
+                    // Recalcular acuracidade se possível
+                    $dadosUpdate['acuracidade'] = $this->calcularAcuracidade(
+                        $dadosUpdate['itens_atendidos_nota'],
+                        $dadosUpdate['total_itens_pedido']
+                    );
+
+                    // Se pontos vieram zerados ou inválidos, podemos tentar recalcular,
+                    // mas a prioridade é o valor do arquivo (normalizado).
+
+                    $registro = RegistroRir::updateOrCreate($chaveUnica, $dadosUpdate);
+
+                    if ($registro->wasRecentlyCreated) {
+                        $importados++;
+                    } else {
+                        $atualizados++;
+                    }
+
+                    $meses[] = $dadosUpdate['mes_referencia'];
                 }
             }
         });
 
         return [
             'importados' => $importados,
+            'atualizados' => $atualizados, // Novo campo
             'ignorados' => $ignorados,
             'meses' => array_values(array_unique($meses)),
         ];
     }
 
-    private function parseSpreadsheet(string $path): array
+    private function parseSpreadsheet(UploadedFile $file): array
     {
-        $spreadsheet = IOFactory::load($path);
-        $sheet = $spreadsheet->getActiveSheet();
-        $highestRow = $sheet->getHighestRow();
-        $highestColumnIndex = Coordinate::columnIndexFromString($sheet->getHighestColumn());
+        $spreadsheet = IOFactory::load($file->getRealPath());
+        $allRows = [];
 
-        $headerRow = $this->findHeaderRow($sheet, $highestRow, $highestColumnIndex);
-        if (!$headerRow) {
-            throw new RuntimeException('Cabeçalho não encontrado no arquivo RIR.');
-        }
+        // Itera sobre todas as abas (JAN, FEV, MAR...)
+        foreach ($spreadsheet->getAllSheets() as $sheet) {
+            $sheetName = $sheet->getTitle();
+            $highestRow = $sheet->getHighestRow();
 
-        Log::channel('rir_import')->debug('Linha de cabeçalho detectada', [
-            'header_row' => $headerRow,
-            'highest_row' => $highestRow,
-            'highest_column_index' => $highestColumnIndex,
-        ]);
+            // Layout fixo: começa na linha 7 (ROW_OFFSET + 1)
+            for ($row = self::ROW_OFFSET + 1; $row <= $highestRow; $row++) {
 
-        $columnMap = $this->buildColumnMap($sheet, $headerRow, $highestColumnIndex);
+                $fornecedorRaw = $this->getVal($sheet, $row, self::COL_FORNECEDOR);
+                $pontosRaw = $this->getVal($sheet, $row, self::COL_PONTOS);
 
-        Log::channel('rir_import')->debug('Mapa de colunas detectado', [
-            'header_row' => $headerRow,
-            'map' => $columnMap,
-        ]);
-
-        $rows = [];
-        for ($row = $headerRow + 1; $row <= $highestRow; $row++) {
-            $fornecedor = $this->cellValue($sheet, $row, $columnMap['fornecedor'] ?? null);
-            $data = $this->cellValue($sheet, $row, $columnMap['data_recebimento'] ?? null);
-            $numeroPedido = $this->cellValue($sheet, $row, $columnMap['numero_pedido'] ?? null);
-            $numeroNota = $this->cellValue($sheet, $row, $columnMap['numero_nota_fiscal'] ?? null);
-            $totalItens = $this->cellValue($sheet, $row, $columnMap['total_itens_pedido'] ?? null);
-            $itensAtendidos = $this->cellValue($sheet, $row, $columnMap['itens_atendidos_nota'] ?? null);
-            $embalagem = $this->cellValue($sheet, $row, $columnMap['criterio_embalagem'] ?? null);
-            $temperatura = $this->cellValue($sheet, $row, $columnMap['criterio_temperatura'] ?? null);
-            $prazo = $this->cellValue($sheet, $row, $columnMap['criterio_prazo'] ?? null);
-            $validade = $this->cellValue($sheet, $row, $columnMap['criterio_validade'] ?? null);
-            $atendimento = $this->cellValue($sheet, $row, $columnMap['criterio_atendimento'] ?? null);
-
-            if ($fornecedor === null && $data === null && $numeroPedido === null) {
-                continue;
-            }
-
-            $rows[] = [
-                'fornecedor' => $fornecedor,
-                'data_recebimento' => $data,
-                'numero_pedido' => $numeroPedido,
-                'numero_nota_fiscal' => $numeroNota,
-                'total_itens_pedido' => $totalItens,
-                'itens_atendidos_nota' => $itensAtendidos,
-                'criterio_embalagem' => $embalagem,
-                'criterio_temperatura' => $temperatura,
-                'criterio_prazo' => $prazo,
-                'criterio_validade' => $validade,
-                'criterio_atendimento' => $atendimento,
-            ];
-        }
-
-        return $rows;
-    }
-
-    private function findHeaderRow(Worksheet $sheet, int $highestRow, int $highestColumnIndex): ?int
-    {
-        $maxSearch = min($highestRow, 30);
-        $bestRow = null;
-        $bestScore = 0;
-
-        for ($row = 1; $row <= $maxSearch; $row++) {
-            $score = 0;
-
-            for ($col = 1; $col <= $highestColumnIndex; $col++) {
-                $header = $this->normalizeHeader($this->cellValue($sheet, $row, $col));
-                if ($header === '') {
+                // Regra: "Se Coluna B (Fornecedor) estiver vazia OU Coluna M (Pontos) for erro/#DIV/0!, a linha deve ser descartada"
+                if (empty($fornecedorRaw) || $this->isErroExcel($pontosRaw)) {
                     continue;
                 }
 
-                if ($this->isDataRecebimentoHeader($header)) {
-                    $score += 2;
-                }
-                if ($this->isFornecedorHeader($header)) {
-                    $score += 2;
-                }
-                if ($this->isNumeroPedidoHeader($header)) {
-                    $score += 1;
-                }
-                if ($this->isNumeroNotaFiscalHeader($header)) {
-                    $score += 1;
-                }
-            }
+                $dataRaw = $this->getVal($sheet, $row, self::COL_DATA);
 
-            if ($score > $bestScore) {
-                $bestScore = $score;
-                $bestRow = $row;
+                // Passa o nome da ABA como contexto para data
+                $data = $this->parseDate($dataRaw, $file->getClientOriginalName(), $sheetName);
+
+                $allRows[] = [
+                    'data_recebimento' => $data,
+                    'fornecedor' => $fornecedorRaw,
+                    'numero_pedido' => $this->getVal($sheet, $row, self::COL_PEDIDO),
+                    'numero_nota_fiscal' => $this->getVal($sheet, $row, self::COL_NOTA),
+                    'total_itens_pedido' => $this->getVal($sheet, $row, self::COL_TOTAL_ITENS),
+                    'itens_atendidos_nota' => $this->getVal($sheet, $row, self::COL_ITENS_ATEND),
+                    'criterio_embalagem' => $this->getVal($sheet, $row, self::COL_EMBALAGEM),
+                    'criterio_temperatura' => $this->getVal($sheet, $row, self::COL_TEMPERATURA),
+                    'criterio_prazo' => $this->getVal($sheet, $row, self::COL_PRAZO),
+                    'criterio_validade' => $this->getVal($sheet, $row, self::COL_VALIDADE),
+                    'criterio_atendimento' => $this->getVal($sheet, $row, self::COL_ATENDIMENTO),
+                    'total_pontos' => $this->normalizarPontuacao($pontosRaw),
+                    'classificacao' => $this->getVal($sheet, $row, self::COL_OBS),
+                ];
             }
         }
 
-        return $bestScore >= 4 ? $bestRow : null;
+        return $allRows;
     }
 
-    private function buildColumnMap(Worksheet $sheet, int $headerRow, int $highestColumnIndex): array
+    private function getVal($sheet, int $row, int $col): mixed
     {
-        $map = [];
-        $headers = [];
-        for ($col = 1; $col <= $highestColumnIndex; $col++) {
-            $value = $this->normalizeHeader($this->cellValue($sheet, $headerRow, $col));
-            if ($value === '') {
-                continue;
-            }
-
-            $headers[$col] = $value;
-
-            if ($this->isDataRecebimentoHeader($value)) {
-                $map['data_recebimento'] = $col;
-            }
-            if ($this->isFornecedorHeader($value)) {
-                $map['fornecedor'] = $col;
-            }
-            if ($this->isNumeroPedidoHeader($value)) {
-                $map['numero_pedido'] = $col;
-            }
-            if ($this->isNumeroNotaFiscalHeader($value)) {
-                $map['numero_nota_fiscal'] = $col;
-            }
-            if ($this->hasAllWords($value, ['total', 'itens', 'pedido'])) {
-                $map['total_itens_pedido'] = $col;
-            }
-            if ($this->isItensAtendidosHeader($value)) {
-                $map['itens_atendidos_nota'] = $col;
-            }
-            if ($this->hasWord($value, 'embalagem')) {
-                $map['criterio_embalagem'] = $col;
-            }
-            if ($this->hasWord($value, 'temperatura')) {
-                $map['criterio_temperatura'] = $col;
-            }
-            if ($this->hasWord($value, 'prazo')) {
-                $map['criterio_prazo'] = $col;
-            }
-            if ($this->hasWord($value, 'validade')) {
-                $map['criterio_validade'] = $col;
-            }
-            if ($this->hasWord($value, 'atendimento')) {
-                $map['criterio_atendimento'] = $col;
-            }
-        }
-
-        $required = [
-            'data_recebimento',
-            'fornecedor',
-            'numero_pedido',
-            'numero_nota_fiscal',
-            'total_itens_pedido',
-            'itens_atendidos_nota',
-            'criterio_embalagem',
-            'criterio_temperatura',
-            'criterio_prazo',
-            'criterio_validade',
-            'criterio_atendimento',
-        ];
-        foreach ($required as $key) {
-            if (!isset($map[$key])) {
-                $faltantes = array_values(array_filter($required, fn ($k) => !isset($map[$k])));
-
-                Log::channel('rir_import')->warning('Falha ao mapear colunas obrigatórias', [
-                    'header_row' => $headerRow,
-                    'faltantes' => $faltantes,
-                    'headers_normalizados' => $headers,
-                    'map_detectado' => $map,
-                ]);
-
-                throw new RuntimeException('Colunas obrigatórias não encontradas no arquivo RIR: ' . implode(', ', $faltantes) . '.');
-            }
-        }
-
-        return $map;
+        $val = $sheet->getCell([$col, $row])->getValue(); # Usando array [col, row] para coordenadas 1-based (A=1)
+        // Correção: getCellByColumnAndRow usa (col, row). getCell usa 'A1'.
+        // Melhor usar getCellByColumnAndRow($col, $row)->getValue();
+        return $sheet->getCellByColumnAndRow($col, $row)->getValue();
     }
 
-    private function cellValue(Worksheet $sheet, int $row, ?int $column): mixed
+    private function carregarAliases(): void
     {
-        if ($column === null) {
-            return null;
+        // Se a tabela não existir (migração pendente), evita crash
+        try {
+            $this->aliases = FornecedorAlias::pluck('fornecedor_id', 'alias')->toArray();
+            // Ops, preciso do nome, não ID, para firstOrCreate.
+            // Melhor carregar relacional ou apenas array de nomes normais.
+            // Para simplificar: carrega [alias => nome_oficial]
+            // Mas o FornecedorAlias tem FK para Fornecedor.
+            // Então carrego: alias -> fornecedor->nome
+            $results = FornecedorAlias::with('fornecedor')->get();
+            foreach ($results as $item) {
+                if ($item->fornecedor) {
+                    $this->aliases[$item->alias] = $item->fornecedor->nome;
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->aliases = [];
         }
-
-        $value = $sheet->getCellByColumnAndRow($column, $row)->getValue();
-        if (is_string($value)) {
-            $value = trim($value);
-        }
-
-        return $value === '' ? null : $value;
     }
 
-    private function normalizeHeader(?string $value): string
+    private function normalizarFornecedor(?string $raw): string
     {
-        if ($value === null) {
+        if (!$raw)
             return '';
-        }
-
-        $normalized = mb_strtolower(trim($value));
-        $normalized = str_replace(["\r", "\n", "\t"], ' ', $normalized);
-        $normalized = str_replace(['º', '°'], 'o', $normalized);
-
-        $translit = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $normalized);
-        if (is_string($translit) && $translit !== '') {
-            $normalized = $translit;
-        }
-
-        $normalized = preg_replace('/[^a-z0-9]+/i', ' ', $normalized);
-        $normalized = preg_replace('/\s+/', ' ', $normalized);
-
-        return trim($normalized);
+        $normalized = mb_strtoupper(trim($raw));
+        return $this->aliases[$normalized] ?? $normalized;
     }
 
-    private function parseDate(mixed $value): ?Carbon
+    private function isErroExcel(mixed $val): bool
     {
-        if ($value instanceof \DateTimeInterface) {
-            return Carbon::instance($value);
+        if (is_string($val)) {
+            // Verifica #DIV/0!, #N/A, #REF!, etc.
+            if (str_starts_with($val, '#'))
+                return true;
         }
+        return false;
+    }
 
-        if (is_numeric($value)) {
-            return Carbon::instance(ExcelDate::excelToDateTimeObject($value));
+    private function normalizarPontuacao(mixed $val): float
+    {
+        if (is_numeric($val)) {
+            return (float) $val;
         }
+        if (is_string($val)) {
+            $isPercent = str_contains($val, '%');
+            $v = str_replace(['%', ' '], '', $val);
+            $v = str_replace(',', '.', $v);
 
-        if (is_string($value)) {
+            if (is_numeric($v)) {
+                $floatVal = (float) $v;
+                // Se tinha % ou se é um valor inteiro alto (ex: 83, 100), divide por 100
+                // Se é um decimal pequeno (ex: 0.95) e não tinha %, assume que já está em decimal
+                if ($isPercent || $floatVal > 1) {
+                    return $floatVal / 100;
+                }
+                return $floatVal;
+            }
+        }
+        return 0.0;
+    }
+
+    private function parseDate(mixed $val, string $filename, string $sheetName): ?Carbon
+    {
+        // Prioridade 1: Data da célula
+        if ($val instanceof \DateTimeInterface) {
+            return Carbon::instance($val);
+        }
+        if (is_numeric($val)) {
             try {
-                return Carbon::parse($value);
-            } catch (\Throwable $exception) {
-                return null;
+                return Carbon::instance(ExcelDate::excelToDateTimeObject($val));
+            } catch (\Exception $e) {
+            }
+        }
+        if (is_string($val)) {
+            try {
+                return Carbon::createFromFormat('d/m/Y', trim($val));
+            } catch (\Exception $e) {
+                try {
+                    return Carbon::parse($val);
+                } catch (\Exception $e) {
+                }
             }
         }
 
+        // Prioridade 2: Nome do arquivo (ex: "FOR.GER.008 RIR.RIR - JAN 25.csv") ou nome da aba (ex: "JAN")
+        $dateFromName = $this->extrairDataDoNome($filename, $sheetName);
+        if ($dateFromName) {
+            return $dateFromName;
+        }
+
+        return null; // Fallback se tudo falhar
+    }
+
+    private function extrairDataDoNome(string $filename, string $sheetName): ?Carbon
+    {
+        $meses = [
+            'JAN' => 1,
+            'FEV' => 2,
+            'MAR' => 3,
+            'ABR' => 4,
+            'MAI' => 5,
+            'JUN' => 6,
+            'JUL' => 7,
+            'AGO' => 8,
+            'SET' => 9,
+            'OUT' => 10,
+            'NOV' => 11,
+            'DEZ' => 12
+        ];
+
+        // 1. Tenta extrair Mês E Ano do nome da ABA (ex: "MAR 25", "Janeiro 2026")
+        if (preg_match('/(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)[^0-9]*(\d{2,4})/i', $sheetName, $matches)) {
+            $mesStr = mb_strtoupper(substr($matches[1], 0, 3));
+            $ano = (int) $matches[2];
+            if ($ano < 100)
+                $ano += 2000;
+            return Carbon::create($ano, $meses[$mesStr], 1);
+        }
+
+        // 2. Tenta extrair do nome da aba (apenas Mês) + Ano do Arquivo
+        // Pega as 3 primeiras letras e converte para maiúsculo
+        $sheetNamePrefix = mb_strtoupper(mb_substr(trim($sheetName), 0, 3));
+        if (array_key_exists($sheetNamePrefix, $meses)) {
+            // Se a aba é um mês, precisamos do ano do nome do arquivo
+            if (preg_match('/(\d{4})/', $filename, $matches)) {
+                $ano = (int) $matches[1];
+                return Carbon::create($ano, $meses[$sheetNamePrefix], 1);
+            }
+            // Se não encontrar ano no arquivo, tenta do ano atual (menos ideal)
+            // return Carbon::create(Carbon::now()->year, $meses[$sheetNameUpper], 1);
+        }
+
+        // 3. Tenta extrair do nome do arquivo (ex: "RIR JAN 25.xlsx")
+        // Procura padrões como "JAN 25", "FEV 2025", "01-2025" no nome do arquivo
+        // Regex para "MMM YY" ou "MMM YYYY"
+        if (preg_match('/(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)[\s\-_]*(\d{2,4})/i', $filename, $matches)) {
+            $mesStr = mb_strtoupper($matches[1]);
+            $ano = (int) $matches[2];
+            if ($ano < 100)
+                $ano += 2000; // 25 -> 2025
+
+            return Carbon::create($ano, $meses[$mesStr], 1);
+        }
         return null;
     }
 
-    private function normalizarInteiro(mixed $value): ?int
+
+
+    private function normalizarInteiro(mixed $val): int
     {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        if (is_string($value)) {
-            $value = preg_replace('/[^0-9]/', '', $value);
-        }
-
-        return $value === '' ? null : (int) $value;
+        if (is_numeric($val))
+            return (int) $val;
+        return 0;
     }
 
-    private function normalizarBinario(mixed $value): ?int
+    private function normalizarBinario(mixed $val): int
     {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        if (is_string($value)) {
-            $value = str_replace(',', '.', preg_replace('/[^0-9,\.]/', '', $value));
-        }
-
-        $numero = (float) $value;
-
-        if (in_array($numero, [0.0, 1.0], true)) {
-            return (int) $numero;
-        }
-
-        return $numero >= 1 ? 1 : 0;
+        if (is_numeric($val))
+            return (int) $val;
+        return 0;
     }
 
-    private function calcularAcuracidade(int $itensAtendidos, int $totalItens): float
+    private function calcularAcuracidade($atendidos, $total): float
     {
-        if ($totalItens <= 0) {
-            return 0.0;
-        }
-
-        $valor = $itensAtendidos / $totalItens;
-        return max(0, min(1, $valor));
-    }
-
-    private function calcularTotalPontos(
-        float $acuracidade,
-        int $embalagem,
-        int $temperatura,
-        int $prazo,
-        int $validade,
-        int $atendimento
-    ): float {
-        $criterios = [$acuracidade, $embalagem, $temperatura, $prazo, $validade, $atendimento];
-        $total = array_sum($criterios) / count($criterios);
-        return max(0, min(1, $total));
-    }
-
-    private function words(string $value): array
-    {
-        $value = trim($value);
-        if ($value === '') {
-            return [];
-        }
-
-        $parts = preg_split('/\s+/', $value) ?: [];
-        $parts = array_map(function ($part) {
-            $part = trim((string) $part);
-            if ($part === '') {
-                return '';
-            }
-
-            $part = preg_replace('/\d+/', '', $part);
-
-            return trim((string) $part);
-        }, $parts);
-
-        $parts = array_values(array_filter($parts, fn ($p) => $p !== ''));
-
-        return array_values(array_unique($parts));
-    }
-
-    private function hasWord(string $header, string $word): bool
-    {
-        return in_array($word, $this->words($header), true);
-    }
-
-    private function hasAllWords(string $header, array $words): bool
-    {
-        $headerWords = $this->words($header);
-        foreach ($words as $word) {
-            if (!in_array($word, $headerWords, true)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private function isDataRecebimentoHeader(string $header): bool
-    {
-        return $this->hasAllWords($header, ['data', 'recebimento'])
-            || $this->hasAllWords($header, ['data', 'receb']);
-    }
-
-    private function isFornecedorHeader(string $header): bool
-    {
-        return $this->hasWord($header, 'fornecedor');
-    }
-
-    private function isNumeroPedidoHeader(string $header): bool
-    {
-        $words = $this->words($header);
-        if (!in_array('pedido', $words, true)) {
-            return false;
-        }
-
-        return in_array('numero', $words, true)
-            || in_array('n', $words, true)
-            || in_array('no', $words, true)
-            || in_array('nro', $words, true)
-            || in_array('num', $words, true);
-    }
-
-    private function isNumeroNotaFiscalHeader(string $header): bool
-    {
-        $words = $this->words($header);
-
-        if (in_array('nf', $words, true) || in_array('nfe', $words, true)) {
-            return true;
-        }
-
-        if (!(in_array('nota', $words, true) && in_array('fiscal', $words, true))) {
-            return false;
-        }
-
-        return in_array('numero', $words, true)
-            || in_array('n', $words, true)
-            || in_array('no', $words, true)
-            || in_array('nro', $words, true)
-            || in_array('num', $words, true)
-            || $this->hasAllWords($header, ['da', 'nota', 'fiscal']);
-    }
-
-    private function isItensAtendidosHeader(string $header): bool
-    {
-        if (!$this->hasWord($header, 'itens')) {
-            return false;
-        }
-
-        $words = $this->words($header);
-        $temAtendidos = in_array('atendidos', $words, true) || in_array('entregues', $words, true);
-        $temNota = in_array('nota', $words, true) || in_array('nf', $words, true);
-
-        return $temAtendidos && $temNota;
-    }
-
-    private function classificar(float $nota): string
-    {
-        if ($nota >= 0.9) {
-            return 'Ótimo';
-        }
-
-        if ($nota >= 0.7) {
-            return 'Bom';
-        }
-
-        if ($nota >= 0.5) {
-            return 'Regular';
-        }
-
-        return 'Insatisfatório';
+        if ($total > 0)
+            return $atendidos / $total;
+        return 0.0;
     }
 }

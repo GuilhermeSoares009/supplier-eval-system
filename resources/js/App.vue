@@ -266,6 +266,8 @@ const loadDashboard = async () => {
 const exportarAvaliacao = async () => {
     try {
         isExporting.value = true;
+        // Extrai o ano do mês selecionado (formato: "2025-12" -> "2025")
+        const anoExportacao = selectedMonth.value ? selectedMonth.value.split('-')[0] : selectedYear.value;
         toast.add({
             severity: 'info',
             summary: 'Exportação em andamento',
@@ -273,13 +275,13 @@ const exportarAvaliacao = async () => {
             life: 3000,
         });
         const response = await axios.get('/api/exportar-avaliacao', {
-            params: { ano: selectedYear.value },
+            params: { ano: anoExportacao },
             responseType: 'blob',
         });
         const blob = new Blob([response.data], { type: response.headers['content-type'] });
         const link = document.createElement('a');
         link.href = window.URL.createObjectURL(blob);
-        link.download = `AVALIACAO_FORNECEDORES_${selectedYear.value}.xlsx`;
+        link.download = `AVALIACAO_FORNECEDORES_${anoExportacao}.xlsx`;
         link.click();
         window.URL.revokeObjectURL(link.href);
     } catch (error) {

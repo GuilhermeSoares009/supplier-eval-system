@@ -1,41 +1,101 @@
-import defaultTheme from 'tailwindcss/defaultTheme';
+const animate = require("tailwindcss-animate")
+const defaultTheme = require('tailwindcss/defaultTheme')
 
 /** @type {import('tailwindcss').Config} */
-export default {
+module.exports = {
+    darkMode: ["class"],
     content: [
+        './pages/**/*.{js,jsx,vue}',
+        './components/**/*.{js,jsx,vue}',
+        './app/**/*.{js,jsx,vue}',
+        './src/**/*.{js,jsx,vue}',
         './vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php',
         './storage/framework/views/*.php',
         './resources/**/*.blade.php',
         './resources/**/*.js',
         './resources/**/*.vue',
     ],
+    prefix: "",
     theme: {
+        container: {
+            center: true,
+            padding: "2rem",
+            screens: {
+                "2xl": "1400px",
+            },
+        },
         extend: {
             colors: {
-                primary: '#2563EB',
-                tertiary: '#16A34A',
-                secondary: '#6B7280',
-                error: '#EF4444',
+                border: "hsl(var(--border))",
+                input: "hsl(var(--input))",
+                ring: "hsl(var(--ring))",
+                background: "hsl(var(--background))",
+                foreground: "hsl(var(--foreground))",
+                primary: {
+                    DEFAULT: "hsl(var(--primary))",
+                    foreground: "hsl(var(--primary-foreground))",
+                },
+                secondary: {
+                    DEFAULT: "hsl(var(--secondary))",
+                    foreground: "hsl(var(--secondary-foreground))",
+                },
+                destructive: {
+                    DEFAULT: "hsl(var(--destructive))",
+                    foreground: "hsl(var(--destructive-foreground))",
+                },
+                muted: {
+                    DEFAULT: "hsl(var(--muted))",
+                    foreground: "hsl(var(--muted-foreground))",
+                },
+                accent: {
+                    DEFAULT: "hsl(var(--accent))",
+                    foreground: "hsl(var(--accent-foreground))",
+                },
+                popover: {
+                    DEFAULT: "hsl(var(--popover))",
+                    foreground: "hsl(var(--popover-foreground))",
+                },
+                card: {
+                    DEFAULT: "hsl(var(--card))",
+                    foreground: "hsl(var(--card-foreground))",
+                },
+                success: {
+                    DEFAULT: "hsl(var(--success))",
+                    foreground: "hsl(var(--success-foreground))",
+                },
+                warning: {
+                    DEFAULT: "hsl(var(--warning))",
+                    foreground: "hsl(var(--warning-foreground))",
+                },
+                // Legado (opcional, pode ser removido se migrar tudo)
                 ink: '#0F172A',
-                muted: '#64748B',
-                border: '#E4E7EC',
-                surface: '#FFFFFF',
                 'background-light': '#F6F7FB',
-                'background-dark': '#0B1220',
+            },
+            borderRadius: {
+                xl: "calc(var(--radius) + 4px)",
+                lg: "var(--radius)",
+                md: "calc(var(--radius) - 2px)",
+                sm: "calc(var(--radius) - 4px)",
+            },
+            keyframes: {
+                "accordion-down": {
+                    from: { height: 0 },
+                    to: { height: "var(--radix-accordion-content-height)" },
+                },
+                "accordion-up": {
+                    from: { height: "var(--radix-accordion-content-height)" },
+                    to: { height: 0 },
+                },
+            },
+            animation: {
+                "accordion-down": "accordion-down 0.2s ease-out",
+                "accordion-up": "accordion-up 0.2s ease-out",
             },
             fontFamily: {
                 sans: ['IBM Plex Sans', ...defaultTheme.fontFamily.sans],
                 display: ['Sora', ...defaultTheme.fontFamily.sans],
             },
-            fontSize: {
-                xs: ['0.75rem', { lineHeight: '1.1rem' }],
-                sm: ['0.875rem', { lineHeight: '1.25rem' }],
-                base: ['1rem', { lineHeight: '1.5rem' }],
-                lg: ['1.125rem', { lineHeight: '1.6rem' }],
-                xl: ['1.25rem', { lineHeight: '1.7rem' }],
-                '2xl': ['1.5rem', { lineHeight: '2rem' }],
-            },
         },
     },
-    plugins: [],
-};
+    plugins: [animate],
+}

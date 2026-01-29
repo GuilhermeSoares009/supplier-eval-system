@@ -265,15 +265,25 @@ const loadDashboard = async () => {
 
 const exportarAvaliacao = async () => {
     try {
-        isExporting.value = true;
-        // Extrai o ano do mês selecionado (formato: "2025-12" -> "2025")
-        const anoExportacao = selectedMonth.value ? selectedMonth.value.split('-')[0] : selectedYear.value;
+        // Lógica robusta para determinar o ano de exportação
+        let anoExportacao = selectedYear.value;
+
+        if (selectedMonth.value) {
+            anoExportacao = selectedMonth.value.split('-')[0];
+        } else if (monthOptions.value.length > 0) {
+            // Fallback: Se tem dados carregados mas nenhum mês selecionado, usa o ano do mês mais recente
+            // Assume que monthOptions está ordenado ou pega o último
+            const ultimoMes = monthOptions.value[monthOptions.value.length - 1].value;
+            anoExportacao = ultimoMes.split('-')[0];
+        }
+        
         toast.add({
             severity: 'info',
             summary: 'Exportação em andamento',
-            detail: 'Gerando o arquivo Excel, aguarde...',
+            detail: `Gerando relatório para o ano ${anoExportacao}...`,
             life: 3000,
         });
+
         const response = await axios.get('/api/exportar-avaliacao', {
             params: { ano: anoExportacao },
             responseType: 'blob',

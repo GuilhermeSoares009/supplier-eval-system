@@ -13,7 +13,7 @@ use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 class RirImportService
 {
-    private const ROW_OFFSET = 7;
+    private const ROW_OFFSET = 4;
     private const COL_DATA = 1;
     private const COL_FORNECEDOR = 2;
     private const COL_PEDIDO = 3;
@@ -177,7 +177,40 @@ class RirImportService
         if (!$raw) {
             return '';
         }
+
         $normalized = mb_strtoupper(trim($raw));
+
+        $termosIgnorados = [
+            'CONFORME',
+            'NÃO CONFORME',
+            'NAO CONFORME',
+            'TOTAL',
+            'JANEIRO',
+            'FEVEREIRO',
+            'MARÇO',
+            'MARCO',
+            'ABRIL',
+            'MAIO',
+            'JUNHO',
+            'JULHO',
+            'AGOSTO',
+            'SETEMBRO',
+            'OUTUBRO',
+            'NOVEMBRO',
+            'DEZEMBRO',
+            'FORNECEDOR',
+            'ÓTIMO',
+            'OTIMO',
+            'BOM',
+            'REGULAR',
+            'INSATISFATÓRIO',
+            'INSATISFATORIO',
+        ];
+
+        if (in_array($normalized, $termosIgnorados)) {
+            return '';
+        }
+
         return $this->aliases[$normalized] ?? $normalized;
     }
 

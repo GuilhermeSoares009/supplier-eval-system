@@ -3,7 +3,6 @@
 namespace App\Exports;
 
 use App\Models\RegistroRir;
-use App\Services\AvaliacaoManualParser;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
@@ -12,18 +11,16 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
-use RuntimeException;
 
 class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, WithColumnWidths
 {
     protected string|int $ano;
     protected array $mesesData = [];
-    protected bool $manualAtivo = false;
 
     private const MESES_NOMES = [
         '01' => 'JANEIRO',
         '02' => 'FEVEREIRO',
-        '03' => 'MARÇO',
+        '03' => 'MARÃ‡O',
         '04' => 'ABRIL',
         '05' => 'MAIO',
         '06' => 'JUNHO',
@@ -41,22 +38,18 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
         ['05', '06'],
         ['07', '08'],
         ['09', '10'],
-        ['11', null],
+        ['11', '12'],
     ];
 
-    public function __construct(string|int $ano, ?string $manualPath = null)
+    public function __construct(string|int $ano)
     {
         $this->ano = $ano;
-        if ($manualPath !== null) {
-            $this->processarManual($manualPath);
-        } else {
-            $this->processarDados();
-        }
+        $this->processarDados();
     }
 
     public function title(): string
     {
-        return 'Avaliação ' . $this->ano;
+        return 'AvaliaÃ§Ã£o ' . $this->ano;
     }
 
     public function columnWidths(): array
@@ -90,7 +83,7 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
             }
 
             $fornecedor = $registro->fornecedor->nome ?? 'N/A';
-            $classificacao = $registro->classificacao ?? 'Insatisfatório';
+            $classificacao = $registro->classificacao ?? 'InsatisfatÃ³rio';
 
             if (!isset($agrupado[$mes])) {
                 $agrupado[$mes] = [];
@@ -104,14 +97,14 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
             }
 
             switch ($classificacao) {
-                case 'Ótimo':
+                case 'Ã“timo':
                     $agrupado[$mes][$fornecedor]['otimo']++;
                     break;
                 case 'Bom':
                     $agrupado[$mes][$fornecedor]['bom']++;
                     break;
                 case 'Regular':
-                case 'Insatisfatório':
+                case 'InsatisfatÃ³rio':
                 default:
                     $agrupado[$mes][$fornecedor]['regular']++;
                     break;
@@ -130,26 +123,6 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
                 ];
             }
         }
-    }
-
-    private function processarManual(string $path): void
-    {
-        if (!is_file($path)) {
-            throw new RuntimeException('Arquivo manual não encontrado para exportação.');
-        }
-
-        if (str_ends_with(mb_strtolower($path), '.json')) {
-            $payload = json_decode((string) file_get_contents($path), true);
-            if (!is_array($payload) || !isset($payload['data'])) {
-                throw new RuntimeException('Arquivo manual JSON inválido.');
-            }
-            $this->mesesData = $payload['data'];
-        } else {
-            $parser = new AvaliacaoManualParser();
-            $manual = $parser->parse($path);
-            $this->mesesData = $manual['data'];
-        }
-        $this->manualAtivo = true;
     }
 
     public function array(): array
@@ -187,10 +160,22 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
             '',
         ];
 
+        $linhas[] = [
+            $mes1 ? 'MÃŠS' : '',
+            $mes1 ? 'Ã“TIMO 90 A 100' : '',
+            $mes1 ? 'BOM 70 A 90' : '',
+            $mes1 ? 'REGULAR 50 A 70' : '',
+            '',
+            $mes2 ? 'MÃŠS' : '',
+            $mes2 ? 'Ã“TIMO 90 A 100' : '',
+            $mes2 ? 'BOM 70 A 90' : '',
+            $mes2 ? 'REGULAR 50 A 70' : '',
+        ];
+
         $dados1 = $mes1 ? ($this->mesesData[$mes1] ?? []) : [];
         $dados2 = $mes2 ? ($this->mesesData[$mes2] ?? []) : [];
 
-        $maxRows = max(count($dados1), count($dados2), 1);
+        $maxRows = max(count($dados1), count($dados2));
 
         for ($r = 0; $r < $maxRows; $r++) {
             $linha1 = $dados1[$r] ?? null;
@@ -251,6 +236,15 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
         return in_array($valor, array_values(self::MESES_NOMES), true);
     }
 
+    private function isHeaderLinha(?string $valor): bool
+    {
+        if ($valor === null || $valor === '') {
+            return false;
+        }
+
+        return $valor === 'MÃŠS';
+    }
+
     public function styles(Worksheet $sheet): array
     {
         $highestRow = $sheet->getHighestRow();
@@ -271,9 +265,9 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
             $cellF = $sheet->getCell("F{$row}")->getValue();
 
             $isMesHeader = $this->isMesHeader($cellA) || $this->isMesHeader($cellF);
+            $isHeaderLinha = $this->isHeaderLinha($cellA) || $this->isHeaderLinha($cellF);
 
             if ($isMesHeader) {
-                // Mescla e aplica estilo ao Título do Mês
                 if (!empty($cellA)) {
                     $sheet->mergeCells("A{$row}:D{$row}");
                 }
@@ -296,14 +290,30 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
                 }
             }
 
-            if (!$isMesHeader && !empty($cellA)) {
+            if ($isHeaderLinha) {
+                $style = [
+                    'font' => ['bold' => true, 'size' => 10],
+                    'fill' => $greenFill,
+                    'alignment' => $centerAlign,
+                    'borders' => $thinBorder,
+                ];
+
+                if ($cellA === 'MÃŠS') {
+                    $sheet->getStyle("A{$row}:D{$row}")->applyFromArray($style);
+                }
+                if ($cellF === 'MÃŠS') {
+                    $sheet->getStyle("F{$row}:I{$row}")->applyFromArray($style);
+                }
+            }
+
+            if (!$isMesHeader && !$isHeaderLinha && !empty($cellA)) {
                 $sheet->getStyle("A{$row}:D{$row}")->applyFromArray([
                     'borders' => $thinBorder,
                 ]);
                 $sheet->getStyle("B{$row}:D{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             }
 
-            if (!$isMesHeader && !empty($cellF)) {
+            if (!$isMesHeader && !$isHeaderLinha && !empty($cellF)) {
                 $sheet->getStyle("F{$row}:I{$row}")->applyFromArray([
                     'borders' => $thinBorder,
                 ]);

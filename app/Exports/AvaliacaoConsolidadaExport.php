@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Models\RegistroRir;
+use App\Services\AvaliacaoManualParser;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
@@ -11,11 +12,13 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
+use RuntimeException;
 
 class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, WithColumnWidths
 {
     protected string|int $ano;
     protected array $mesesData = [];
+    protected bool $manualAtivo = false;
 
     private const MESES_NOMES = [
         '01' => 'JANEIRO',
@@ -32,10 +35,23 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
         '12' => 'DEZEMBRO',
     ];
 
-    public function __construct(string|int $ano)
+    private const MESES_PARES = [
+        ['01', '02'],
+        ['03', '04'],
+        ['05', '06'],
+        ['07', '08'],
+        ['09', '10'],
+        ['11', null],
+    ];
+
+    public function __construct(string|int $ano, ?string $manualPath = null)
     {
         $this->ano = $ano;
-        $this->processarDados();
+        if ($manualPath !== null) {
+            $this->processarManual($manualPath);
+        } else {
+            $this->processarDados();
+        }
     }
 
     public function title(): string
@@ -60,12 +76,19 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
 
     private function processarDados(): void
     {
-        $registros = RegistroRir::with('fornecedor')->get();
+        $prefixo = sprintf('%d-', (int) $this->ano);
+        $registros = RegistroRir::with('fornecedor')
+            ->where('mes_referencia', 'like', $prefixo.'%')
+            ->get();
 
         $agrupado = [];
 
         foreach ($registros as $registro) {
-            $mes = $registro->mes_referencia;
+            $mes = $this->extrairMes($registro->mes_referencia);
+            if (!$mes) {
+                continue;
+            }
+
             $fornecedor = $registro->fornecedor->nome ?? 'N/A';
             $classificacao = $registro->classificacao ?? 'Insatisfatório';
 
@@ -96,18 +119,44 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
         }
 
         ksort($agrupado);
-        $this->mesesData = $agrupado;
+        foreach ($agrupado as $mes => $fornecedores) {
+            ksort($fornecedores);
+            foreach ($fornecedores as $nome => $dados) {
+                $this->mesesData[$mes][] = [
+                    'fornecedor' => $nome,
+                    'otimo' => $dados['otimo'],
+                    'bom' => $dados['bom'],
+                    'regular' => $dados['regular'],
+                ];
+            }
+        }
+    }
+
+    private function processarManual(string $path): void
+    {
+        if (!is_file($path)) {
+            throw new RuntimeException('Arquivo manual não encontrado para exportação.');
+        }
+
+        if (str_ends_with(mb_strtolower($path), '.json')) {
+            $payload = json_decode((string) file_get_contents($path), true);
+            if (!is_array($payload) || !isset($payload['data'])) {
+                throw new RuntimeException('Arquivo manual JSON inválido.');
+            }
+            $this->mesesData = $payload['data'];
+        } else {
+            $parser = new AvaliacaoManualParser();
+            $manual = $parser->parse($path);
+            $this->mesesData = $manual['data'];
+        }
+        $this->manualAtivo = true;
     }
 
     public function array(): array
     {
         $rows = [];
-        $meses = array_keys($this->mesesData);
 
-        for ($i = 0; $i < count($meses); $i += 2) {
-            $mes1 = $meses[$i] ?? null;
-            $mes2 = $meses[$i + 1] ?? null;
-
+        foreach (self::MESES_PARES as [$mes1, $mes2]) {
             $bloco = $this->gerarBlocoDoisMeses($mes1, $mes2);
             foreach ($bloco as $linha) {
                 $rows[] = $linha;
@@ -138,54 +187,68 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
             '',
         ];
 
-        $linhas[] = [
-            $mes1 ? 'FORNECEDOR' : '',
-            $mes1 ? 'ÓTIMO 90 A 100' : '',
-            $mes1 ? 'BOM 70 A 90' : '',
-            $mes1 ? 'REGULAR 50 A 70' : '',
-            '',
-            $mes2 ? 'FORNECEDOR' : '',
-            $mes2 ? 'ÓTIMO 90 A 100' : '',
-            $mes2 ? 'BOM 70 A 90' : '',
-            $mes2 ? 'REGULAR 50 A 70' : '',
-        ];
+        $dados1 = $mes1 ? ($this->mesesData[$mes1] ?? []) : [];
+        $dados2 = $mes2 ? ($this->mesesData[$mes2] ?? []) : [];
 
-        $fornecedores1 = $mes1 ? array_keys($this->mesesData[$mes1] ?? []) : [];
-        $fornecedores2 = $mes2 ? array_keys($this->mesesData[$mes2] ?? []) : [];
-
-        sort($fornecedores1);
-        sort($fornecedores2);
-
-        $maxRows = max(count($fornecedores1), count($fornecedores2), 1);
+        $maxRows = max(count($dados1), count($dados2), 1);
 
         for ($r = 0; $r < $maxRows; $r++) {
-            $f1 = $fornecedores1[$r] ?? '';
-            $f2 = $fornecedores2[$r] ?? '';
-
-            $d1 = $f1 ? ($this->mesesData[$mes1][$f1] ?? null) : null;
-            $d2 = $f2 ? ($this->mesesData[$mes2][$f2] ?? null) : null;
+            $linha1 = $dados1[$r] ?? null;
+            $linha2 = $dados2[$r] ?? null;
 
             $linhas[] = [
-                $f1,
-                $d1 ? ($d1['otimo'] ?: '') : '',
-                $d1 ? ($d1['bom'] ?: '') : '',
-                $d1 ? ($d1['regular'] ?: '') : '',
+                $linha1['fornecedor'] ?? '',
+                $this->formatarContagem($linha1['otimo'] ?? null),
+                $this->formatarContagem($linha1['bom'] ?? null),
+                $this->formatarContagem($linha1['regular'] ?? null),
                 '',
-                $f2,
-                $d2 ? ($d2['otimo'] ?: '') : '',
-                $d2 ? ($d2['bom'] ?: '') : '',
-                $d2 ? ($d2['regular'] ?: '') : '',
+                $linha2['fornecedor'] ?? '',
+                $this->formatarContagem($linha2['otimo'] ?? null),
+                $this->formatarContagem($linha2['bom'] ?? null),
+                $this->formatarContagem($linha2['regular'] ?? null),
             ];
         }
 
         return $linhas;
     }
 
-    private function getNomeMes(string $mesRef): string
+    private function getNomeMes(string $mesNum): string
     {
+        return self::MESES_NOMES[$mesNum] ?? $mesNum;
+    }
+
+    private function extrairMes(?string $mesRef): ?string
+    {
+        if (!$mesRef) {
+            return null;
+        }
+
         $parts = explode('-', $mesRef);
-        $mesNum = $parts[1] ?? '01';
-        return self::MESES_NOMES[$mesNum] ?? $mesRef;
+        $mesNum = $parts[1] ?? null;
+        if (!$mesNum || !isset(self::MESES_NOMES[$mesNum])) {
+            return null;
+        }
+
+        return $mesNum;
+    }
+
+    private function formatarContagem(mixed $valor): string|int
+    {
+        if ($valor === null) {
+            return '';
+        }
+
+        $intVal = is_numeric($valor) ? (int) $valor : 0;
+        return $intVal > 0 ? $intVal : '';
+    }
+
+    private function isMesHeader(?string $valor): bool
+    {
+        if ($valor === null || $valor === '') {
+            return false;
+        }
+
+        return in_array($valor, array_values(self::MESES_NOMES), true);
     }
 
     public function styles(Worksheet $sheet): array
@@ -206,20 +269,17 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
         for ($row = 1; $row <= $highestRow; $row++) {
             $cellA = $sheet->getCell("A{$row}")->getValue();
             $cellF = $sheet->getCell("F{$row}")->getValue();
-            $cellB = $sheet->getCell("B{$row}")->getValue();
 
-            // Detecta cabeçalhos principais (ex: JANEIRO)
-            $isMesHeader = in_array($cellA, array_values(self::MESES_NOMES)) || in_array($cellF, array_values(self::MESES_NOMES));
-
-            // Detecta subcabeçalhos (ex: FORNECEDOR)
-            $isSubHeader = ($cellA === 'FORNECEDOR' || $cellF === 'FORNECEDOR');
+            $isMesHeader = $this->isMesHeader($cellA) || $this->isMesHeader($cellF);
 
             if ($isMesHeader) {
-                // Mescla e aplica estlo ao Título do Mês
-                if (!empty($cellA))
+                // Mescla e aplica estilo ao Título do Mês
+                if (!empty($cellA)) {
                     $sheet->mergeCells("A{$row}:D{$row}");
-                if (!empty($cellF))
+                }
+                if (!empty($cellF)) {
                     $sheet->mergeCells("F{$row}:I{$row}");
+                }
 
                 $style = [
                     'font' => ['bold' => true, 'size' => 11],
@@ -228,35 +288,22 @@ class AvaliacaoConsolidadaExport implements FromArray, WithStyles, WithTitle, Wi
                     'borders' => $thinBorder,
                 ];
 
-                if (!empty($cellA))
+                if (!empty($cellA)) {
                     $sheet->getStyle("A{$row}:D{$row}")->applyFromArray($style);
-                if (!empty($cellF))
+                }
+                if (!empty($cellF)) {
                     $sheet->getStyle("F{$row}:I{$row}")->applyFromArray($style);
+                }
             }
 
-            if ($isSubHeader) {
-                // Aplica estilo à linha de colunas (FORNECEDOR, ÓTIMO...)
-                $style = [
-                    'font' => ['bold' => true, 'size' => 10],
-                    'fill' => $greenFill,
-                    'alignment' => $centerAlign,
-                    'borders' => $thinBorder,
-                ];
-
-                if ($cellA === 'FORNECEDOR')
-                    $sheet->getStyle("A{$row}:D{$row}")->applyFromArray($style);
-                if ($cellF === 'FORNECEDOR')
-                    $sheet->getStyle("F{$row}:I{$row}")->applyFromArray($style);
-            }
-
-            if (!$isMesHeader && !$isSubHeader && !empty($cellA)) {
+            if (!$isMesHeader && !empty($cellA)) {
                 $sheet->getStyle("A{$row}:D{$row}")->applyFromArray([
                     'borders' => $thinBorder,
                 ]);
                 $sheet->getStyle("B{$row}:D{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             }
 
-            if (!$isMesHeader && !$isSubHeader && !empty($cellF)) {
+            if (!$isMesHeader && !empty($cellF)) {
                 $sheet->getStyle("F{$row}:I{$row}")->applyFromArray([
                     'borders' => $thinBorder,
                 ]);
